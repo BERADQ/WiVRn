@@ -1102,6 +1102,9 @@ void scenes::stream::draw_gui(XrTime predicted_display_time, XrDuration predicte
 		}
 	}
 
+	if (gui_status == gui_status::hidden and alpha == 0)
+		return;
+
 	// Add the layer with the GUI
 	for (auto [_, layer]: layers)
 	{

@@ -40,6 +40,8 @@ xr::swapchain::swapchain(
 	assert(sample_count == 1);
 	if (foveated)
 		update = inst.get_proc<PFN_xrUpdateSwapchainFB>("xrUpdateSwapchainFB");
+	else if (inst.has_extension(XR_FB_SWAPCHAIN_UPDATE_STATE_VULKAN_EXTENSION_NAME))
+		update = inst.get_proc<PFN_xrUpdateSwapchainFB>("xrUpdateSwapchainFB");
 
 	XrSwapchainUsageFlags usage_flags;
 
