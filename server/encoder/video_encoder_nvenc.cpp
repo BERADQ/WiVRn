@@ -177,7 +177,7 @@ video_encoder_nvenc::video_encoder_nvenc(
 
 #pragma GCC diagnostic push
 #pragma GCC diagnostic ignored "-Wdeprecated-declarations"
-	GUID presetGUID = NV_ENC_PRESET_P4_GUID;
+	GUID presetGUID = NV_ENC_PRESET_P1_GUID;
 	check_preset_guid_supported(shared_state, session_handle, encodeGUID, presetGUID);
 
 	NV_ENC_TUNING_INFO tuningInfo = NV_ENC_TUNING_INFO_ULTRA_LOW_LATENCY;
@@ -229,7 +229,7 @@ video_encoder_nvenc::video_encoder_nvenc(
 				throw std::runtime_error("nvenc: selected codec only supports 8-bit encoding");
 
 			config.encodeCodecConfig.h264Config.repeatSPSPPS = 1;
-			config.encodeCodecConfig.h264Config.maxNumRefFrames = 0;
+			config.encodeCodecConfig.h264Config.maxNumRefFrames = 1;
 			config.encodeCodecConfig.h264Config.idrPeriod = NVENC_INFINITE_GOPLENGTH;
 			config.encodeCodecConfig.h264Config.h264VUIParameters.videoFullRangeFlag = 1;
 
@@ -245,7 +245,7 @@ video_encoder_nvenc::video_encoder_nvenc(
 			config.encodeCodecConfig.hevcConfig.outputBitDepth = bitDepth;
 
 			config.encodeCodecConfig.hevcConfig.repeatSPSPPS = 1;
-			config.encodeCodecConfig.hevcConfig.maxNumRefFramesInDPB = 0;
+			config.encodeCodecConfig.hevcConfig.maxNumRefFramesInDPB = 1;
 			config.encodeCodecConfig.hevcConfig.idrPeriod = NVENC_INFINITE_GOPLENGTH;
 			config.encodeCodecConfig.hevcConfig.hevcVUIParameters.videoFullRangeFlag = 1;
 
@@ -261,7 +261,7 @@ video_encoder_nvenc::video_encoder_nvenc(
 			config.encodeCodecConfig.av1Config.outputBitDepth = bitDepth;
 
 			config.encodeCodecConfig.av1Config.repeatSeqHdr = 1;
-			config.encodeCodecConfig.av1Config.maxNumRefFramesInDPB = 0;
+			config.encodeCodecConfig.av1Config.maxNumRefFramesInDPB = 1;
 			config.encodeCodecConfig.av1Config.idrPeriod = NVENC_INFINITE_GOPLENGTH;
 
 			break;
