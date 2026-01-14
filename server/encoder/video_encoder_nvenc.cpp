@@ -138,7 +138,7 @@ NV_ENC_RC_PARAMS video_encoder_nvenc::get_rc_params(uint64_t bitrate, float fram
 	        .vbvBufferSize = static_cast<uint32_t>(bitrate / framerate * 2.0f),
 	        .vbvInitialDelay = static_cast<uint32_t>(bitrate / framerate),
 	        .enableLookahead = 0,
-	        .lowDelayKeyFrameScale = 1,
+	        .lowDelayKeyFrameScale = 2,
 	        .multiPass = NV_ENC_TWO_PASS_QUARTER_RESOLUTION};
 }
 
@@ -197,7 +197,7 @@ video_encoder_nvenc::video_encoder_nvenc(
 	config.rcParams.enableAQ = 1;
 	config.rcParams.enableNonRefP = 1;
 
-	config.gopLength = NVENC_INFINITE_GOPLENGTH;
+	config.gopLength = 100;
 	config.frameIntervalP = 1;
 
 	NV_ENC_BIT_DEPTH bitDepth = NV_ENC_BIT_DEPTH_8;
@@ -230,7 +230,7 @@ video_encoder_nvenc::video_encoder_nvenc(
 
 			config.encodeCodecConfig.h264Config.repeatSPSPPS = 1;
 			config.encodeCodecConfig.h264Config.maxNumRefFrames = 1;
-			config.encodeCodecConfig.h264Config.idrPeriod = NVENC_INFINITE_GOPLENGTH;
+			config.encodeCodecConfig.h264Config.idrPeriod = 100;
 			config.encodeCodecConfig.h264Config.h264VUIParameters.videoFullRangeFlag = 1;
 
 			break;
@@ -246,7 +246,7 @@ video_encoder_nvenc::video_encoder_nvenc(
 
 			config.encodeCodecConfig.hevcConfig.repeatSPSPPS = 1;
 			config.encodeCodecConfig.hevcConfig.maxNumRefFramesInDPB = 1;
-			config.encodeCodecConfig.hevcConfig.idrPeriod = NVENC_INFINITE_GOPLENGTH;
+			config.encodeCodecConfig.hevcConfig.idrPeriod = 100;
 			config.encodeCodecConfig.hevcConfig.hevcVUIParameters.videoFullRangeFlag = 1;
 
 			break;
@@ -262,7 +262,7 @@ video_encoder_nvenc::video_encoder_nvenc(
 
 			config.encodeCodecConfig.av1Config.repeatSeqHdr = 1;
 			config.encodeCodecConfig.av1Config.maxNumRefFramesInDPB = 1;
-			config.encodeCodecConfig.av1Config.idrPeriod = NVENC_INFINITE_GOPLENGTH;
+			config.encodeCodecConfig.av1Config.idrPeriod = 100;
 
 			break;
 		case video_codec::raw:
