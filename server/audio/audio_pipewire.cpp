@@ -137,10 +137,6 @@ struct pipewire_device : public audio_device
 			                // Declare target latency to help PipeWire optimize buffering
 			                PW_KEY_NODE_LATENCY,
 			                latency_str.c_str(),
-			                // Force constant quantum size to prevent dynamic buffer size changes
-			                // Variable buffer sizes cause crackling in effect processors (EasyEffects)
-			                PW_KEY_NODE_FORCE_QUANTUM,
-			                latency_str.c_str(),
 			                NULL),
 			        &speaker_events,
 			        this));
@@ -153,6 +149,19 @@ struct pipewire_device : public audio_device
 			        .rate = desc.speaker->sample_rate,
 			        .channels = desc.speaker->num_channels,
 			};
+
+			switch (audio_info.channels)
+			{
+				case 1:
+					audio_info.position[0] = SPA_AUDIO_CHANNEL_MONO;
+					break;
+				case 2:
+					audio_info.position[0] = SPA_AUDIO_CHANNEL_FL;
+					audio_info.position[1] = SPA_AUDIO_CHANNEL_FR;
+					break;
+				default:
+					U_LOG_W("No known audio mapping for %d channels speaker", audio_info.channels);
+			}
 
 			const spa_pod * params[1];
 			params[0] = spa_format_audio_raw_build(&b, SPA_PARAM_EnumFormat, &audio_info);
@@ -210,9 +219,6 @@ struct pipewire_device : public audio_device
 			                // Declare target latency to help PipeWire optimize buffering
 			                PW_KEY_NODE_LATENCY,
 			                latency_str.c_str(),
-			                // Force constant quantum size to prevent dynamic buffer size changes
-			                PW_KEY_NODE_FORCE_QUANTUM,
-			                latency_str.c_str(),
 			                NULL),
 			        &mic_events,
 			        this));
@@ -224,6 +230,19 @@ struct pipewire_device : public audio_device
 			        .rate = desc.microphone->sample_rate,
 			        .channels = desc.microphone->num_channels,
 			};
+
+			switch (audio_info.channels)
+			{
+				case 1:
+					audio_info.position[0] = SPA_AUDIO_CHANNEL_MONO;
+					break;
+				case 2:
+					audio_info.position[0] = SPA_AUDIO_CHANNEL_FL;
+					audio_info.position[1] = SPA_AUDIO_CHANNEL_FR;
+					break;
+				default:
+					U_LOG_W("No known audio mapping for %d channels microphone", audio_info.channels);
+			}
 
 			const spa_pod * params[1];
 			params[0] = spa_format_audio_raw_build(&b, SPA_PARAM_EnumFormat, &audio_info);
@@ -380,7 +399,7 @@ void pipewire_device::process_mic_data(wivrn::audio_data && sample)
 		mic_buffer_size_bytes += size;
 }
 
-std::shared_ptr<audio_device> create_pipewire_handle(
+std::unique_ptr<audio_device> create_pipewire_handle(
         const std::string & source_name,
         const std::string & source_description,
         const std::string & sink_name,
@@ -390,7 +409,7 @@ std::shared_ptr<audio_device> create_pipewire_handle(
 {
 	try
 	{
-		return std::make_shared<pipewire_device>(
+		return std::make_unique<pipewire_device>(
 		        source_name, source_description, sink_name, sink_description, info, session);
 	}
 	catch (std::exception & e)
