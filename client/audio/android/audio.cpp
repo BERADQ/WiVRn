@@ -93,21 +93,33 @@ int32_t wivrn::android::audio::speaker_data_cb(AAudioStream * stream, void * use
 		}
 	}
 
-	// If we have more than 50ms of buffered data, discard some data
 	if (self->buffer_size_bytes > frame_size * AAudioStream_getSampleRate(stream) * 0.05)
 	{
 		// discard excess data until we only have 30ms left
 		size_t target_buffer_size = frame_size * AAudioStream_getSampleRate(stream) * 0.03;
 		while (self->buffer_size_bytes > target_buffer_size and self->output_buffer.size() > 1)
 		{
-			auto tmp = self->output_buffer.read();
+			// Read but check the timestamp
+			auto * tmp = self->output_buffer.peek();
 			if (not tmp)
 				break;
-			auto prev = self->buffer_size_bytes.fetch_sub(tmp->payload.size_bytes());
-			spdlog::info("Audio sync: discard {} bytes (buffer {} target {})",
-			             tmp->payload.size_bytes(),
-			             prev,
-			             target_buffer_size);
+
+			// If the packet is too old, discard it
+			// 100ms tolerance
+			if (tmp->timestamp < self->instance.now() - 100'000'000)
+			{
+				auto p = self->output_buffer.read();
+				auto prev = self->buffer_size_bytes.fetch_sub(p->payload.size_bytes());
+				spdlog::info("Audio sync: discard {} bytes (buffer {} target {})",
+				             p->payload.size_bytes(),
+				             prev,
+				             target_buffer_size);
+			}
+			else
+			{
+				// Packet is recent enough, stop discarding
+				break;
+			}
 		}
 	}
 

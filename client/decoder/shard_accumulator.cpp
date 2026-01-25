@@ -155,6 +155,16 @@ void shard_accumulator::push_shard(video_stream_data_shard && shard)
 		current.reset(shard.frame_idx);
 		next.reset(shard.frame_idx + 1);
 
+		// If we skip more than one frame, ask the encoder to start a new stream (IDR frame)
+		// Send feedback for the skipped frame
+		if (frame_diff > 2)
+		{
+			wivrn::from_headset::feedback f = {};
+			f.frame_index = shard.frame_idx - 1;
+			f.stream_index = current.feedback.stream_index;
+			send_feedback(f);
+		}
+
 		push_shard(std::move(shard));
 	}
 }

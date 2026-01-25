@@ -72,6 +72,7 @@ private:
 		void push(data &&);
 		static std::shared_ptr<sender> get();
 		void wait_idle(video_encoder *);
+		bool is_idle(video_encoder *);
 	};
 
 public:

@@ -87,6 +87,12 @@ void video_encoder::sender::wait_idle(video_encoder * encoder)
 		cv.wait_for(lock, std::chrono::milliseconds(100));
 }
 
+bool video_encoder::sender::is_idle(video_encoder * encoder)
+{
+	std::lock_guard lock(mutex);
+	return std::ranges::none_of(pending, [=](auto & data) { return data.encoder == encoder; });
+}
+
 std::shared_ptr<video_encoder::sender> video_encoder::sender::get()
 {
 	static std::weak_ptr<video_encoder::sender> instance;
@@ -269,8 +275,11 @@ void video_encoder::encode(wivrn_session & cnx,
 	if (state[encode_slot] == skip)
 		return;
 
-	if (shared_sender)
-		shared_sender->wait_idle(this);
+	if (shared_sender and not shared_sender->is_idle(this))
+	{
+		idr->reset();
+		return;
+	}
 	this->cnx = &cnx;
 	clock = cnx.get_offset();
 

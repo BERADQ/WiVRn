@@ -57,6 +57,14 @@ public:
 		return std::move(res);
 	}
 
+	T * peek()
+	{
+		if (read_index == write_index)
+			return nullptr;
+		size_t next_read = (read_index + 1) % capacity;
+		return &container[next_read];
+	}
+
 	size_t size() const
 	{
 		size_t w = write_index;
