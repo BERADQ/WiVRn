@@ -70,6 +70,9 @@ std::vector<const char *> wivrn_comp_target::wanted_device_extensions = {
 #ifdef VK_KHR_video_encode_h265
         VK_KHR_VIDEO_ENCODE_H265_EXTENSION_NAME,
 #endif
+#ifdef VK_KHR_video_encode_av1
+        VK_KHR_VIDEO_ENCODE_AV1_EXTENSION_NAME,
+#endif
 };
 
 static void target_init_semaphores(struct wivrn_comp_target * cn);
@@ -573,6 +576,25 @@ static VkResult comp_wivrn_present(struct comp_target * ct,
 		need_queue_transfer |= transfer;
 		if (sem)
 			present_done_sem.push_back(sem);
+		else
+		{
+			static std::atomic_bool warned = false;
+			if (!warned.exchange(true))
+				U_LOG_W("present_image returned null semaphore for encoder");
+		}
+	}
+	{
+		static std::atomic_bool warned = false;
+		if (!warned.exchange(true))
+			U_LOG_W("present semaphores: %zu, need_queue_transfer=%d", present_done_sem.size(), need_queue_transfer ? 1 : 0);
+	}
+	{
+		static std::atomic_bool warned = false;
+		if (!warned.exchange(true))
+		{
+			for (auto & sem: present_done_sem)
+				U_LOG_W("present signal semaphore handle=%p", (void *)VkSemaphore(sem));
+		}
 	}
 
 #if WIVRN_USE_VULKAN_ENCODE
@@ -580,9 +602,9 @@ static VkResult comp_wivrn_present(struct comp_target * ct,
 	{
 		vk::ImageMemoryBarrier barrier{
 		        .srcAccessMask = vk::AccessFlagBits::eMemoryRead,
-		        .dstAccessMask = vk::AccessFlagBits::eMemoryWrite,
+		        .dstAccessMask = vk::AccessFlagBits::eNone,
 		        .oldLayout = vk::ImageLayout::eTransferSrcOptimal,
-		        .newLayout = vk::ImageLayout::eVideoEncodeSrcKHR,
+		        .newLayout = vk::ImageLayout::eTransferSrcOptimal,
 		        .srcQueueFamilyIndex = vk->main_queue->family_index,
 		        .dstQueueFamilyIndex = vk->encode_queue->family_index,
 		        .image = psc_image.image,
@@ -600,7 +622,8 @@ static VkResult comp_wivrn_present(struct comp_target * ct,
 		        {},
 		        barrier);
 	}
-	submit_info.setSignalSemaphores(present_done_sem);
+	if (!present_done_sem.empty())
+		submit_info.setSignalSemaphores(present_done_sem);
 #endif
 	command_buffer.end();
 	submit_info.setCommandBuffers(*command_buffer);
