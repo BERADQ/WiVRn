@@ -138,7 +138,7 @@ NV_ENC_RC_PARAMS video_encoder_nvenc::get_rc_params(uint64_t bitrate, float fram
 	        .vbvBufferSize = static_cast<uint32_t>(bitrate / framerate * 2.0f),
 	        .vbvInitialDelay = static_cast<uint32_t>(bitrate / framerate),
 	        .enableLookahead = 0,
-	        .lowDelayKeyFrameScale = 1,
+	        .lowDelayKeyFrameScale = 2,
 	        .multiPass = NV_ENC_TWO_PASS_QUARTER_RESOLUTION};
 }
 
@@ -177,7 +177,7 @@ video_encoder_nvenc::video_encoder_nvenc(
 
 #pragma GCC diagnostic push
 #pragma GCC diagnostic ignored "-Wdeprecated-declarations"
-	GUID presetGUID = NV_ENC_PRESET_P4_GUID;
+	GUID presetGUID = NV_ENC_PRESET_P1_GUID;
 	check_preset_guid_supported(shared_state, session_handle, encodeGUID, presetGUID);
 
 	NV_ENC_TUNING_INFO tuningInfo = NV_ENC_TUNING_INFO_ULTRA_LOW_LATENCY;
@@ -197,7 +197,8 @@ video_encoder_nvenc::video_encoder_nvenc(
 	config.rcParams.enableAQ = 1;
 	config.rcParams.enableNonRefP = 1;
 
-	config.gopLength = NVENC_INFINITE_GOPLENGTH;
+	// config.gopLength = NVENC_INFINITE_GOPLENGTH;
+	config.gopLength = 30;
 	config.frameIntervalP = 1;
 
 	NV_ENC_BIT_DEPTH bitDepth = NV_ENC_BIT_DEPTH_8;
@@ -229,8 +230,10 @@ video_encoder_nvenc::video_encoder_nvenc(
 				throw std::runtime_error("nvenc: selected codec only supports 8-bit encoding");
 
 			config.encodeCodecConfig.h264Config.repeatSPSPPS = 1;
-			config.encodeCodecConfig.h264Config.maxNumRefFrames = 0;
-			config.encodeCodecConfig.h264Config.idrPeriod = NVENC_INFINITE_GOPLENGTH;
+			// config.encodeCodecConfig.h264Config.maxNumRefFrames = 0;
+			// config.encodeCodecConfig.h264Config.idrPeriod = NVENC_INFINITE_GOPLENGTH;
+			config.encodeCodecConfig.h264Config.maxNumRefFrames = 1;
+			config.encodeCodecConfig.h264Config.idrPeriod = 30;
 			config.encodeCodecConfig.h264Config.h264VUIParameters.videoFullRangeFlag = 1;
 
 			break;
@@ -245,8 +248,10 @@ video_encoder_nvenc::video_encoder_nvenc(
 			config.encodeCodecConfig.hevcConfig.outputBitDepth = bitDepth;
 
 			config.encodeCodecConfig.hevcConfig.repeatSPSPPS = 1;
-			config.encodeCodecConfig.hevcConfig.maxNumRefFramesInDPB = 0;
-			config.encodeCodecConfig.hevcConfig.idrPeriod = NVENC_INFINITE_GOPLENGTH;
+			// config.encodeCodecConfig.hevcConfig.maxNumRefFramesInDPB = 0;
+			// config.encodeCodecConfig.hevcConfig.idrPeriod = NVENC_INFINITE_GOPLENGTH;
+			config.encodeCodecConfig.hevcConfig.maxNumRefFramesInDPB = 1;
+			config.encodeCodecConfig.hevcConfig.idrPeriod = 30;
 			config.encodeCodecConfig.hevcConfig.hevcVUIParameters.videoFullRangeFlag = 1;
 
 			break;
@@ -261,8 +266,10 @@ video_encoder_nvenc::video_encoder_nvenc(
 			config.encodeCodecConfig.av1Config.outputBitDepth = bitDepth;
 
 			config.encodeCodecConfig.av1Config.repeatSeqHdr = 1;
-			config.encodeCodecConfig.av1Config.maxNumRefFramesInDPB = 0;
-			config.encodeCodecConfig.av1Config.idrPeriod = NVENC_INFINITE_GOPLENGTH;
+			// config.encodeCodecConfig.av1Config.maxNumRefFramesInDPB = 0;
+			// config.encodeCodecConfig.av1Config.idrPeriod = NVENC_INFINITE_GOPLENGTH;
+			config.encodeCodecConfig.av1Config.maxNumRefFramesInDPB = 1;
+			config.encodeCodecConfig.av1Config.idrPeriod = 30;
 
 			break;
 		case video_codec::raw:
