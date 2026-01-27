@@ -207,6 +207,17 @@ class prober
 		assert(vk.encode_queue_family_index < prop.size());
 		return bool(prop.at(vk.encode_queue_family_index).get<vk::QueueFamilyVideoPropertiesKHR>().videoCodecOperations & vk::VideoCodecOperationFlagBitsKHR::eEncodeH265);
 	}
+	bool has_vk_av1()
+	{
+		if (*vk.encode_queue == VK_NULL_HANDLE)
+			return false;
+		if (not std::ranges::contains(vk.device_extensions, std::string_view(VK_KHR_VIDEO_ENCODE_AV1_EXTENSION_NAME)))
+			return false;
+
+		auto prop = vk.physical_device.getQueueFamilyProperties2<vk::StructureChain<vk::QueueFamilyProperties2, vk::QueueFamilyVideoPropertiesKHR>>();
+		assert(vk.encode_queue_family_index < prop.size());
+		return bool(prop.at(vk.encode_queue_family_index).get<vk::QueueFamilyVideoPropertiesKHR>().videoCodecOperations & vk::VideoCodecOperationFlagBitsKHR::eEncodeAv1);
+	}
 #endif
 
 public:
@@ -248,7 +259,10 @@ public:
 						U_LOG_I("GPU does not support H.265 Vulkan video encode");
 						break;
 					case av1:
-						U_LOG_D("Vulkan video encode for AV1 is not implemented in WiVRn");
+						if (has_vk_av1())
+							return {encoder_vulkan, video_codec::av1};
+						U_LOG_I("GPU does not support AV1 Vulkan video encode");
+						break;
 					case raw:
 						break;
 				}

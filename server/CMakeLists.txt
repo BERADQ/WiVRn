@@ -159,6 +159,7 @@ if (WIVRN_BUILD_SERVER)
 			encoder/video_encoder_vulkan.cpp
 			encoder/video_encoder_vulkan_h264.cpp
 			encoder/video_encoder_vulkan_h265.cpp
+			encoder/video_encoder_vulkan_av1.cpp
 			)
 	endif()
 
