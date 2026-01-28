@@ -1,7 +1,7 @@
 From 719c381cd2c0e1836249151e689e95bd263bb0f1 Mon Sep 17 00:00:00 2001
 From: BERADQ <adqber123@outlook.com>
 Date: Thu, 29 Jan 2026 04:13:21 +0800
-Subject: [PATCH 11/11] a/vk: Expose video_encode_av1 device feature
+Subject: [PATCH 1/2] a/vk: Expose video_encode_av1 device feature
 
 ---
  src/xrt/auxiliary/vk/vk_bundle_init.c         | 39 ++++++++++++++++++-

@@ -1,0 +1,24 @@
+From 948ad66c0807c2ed2da93c81f7f8301f7e1c49ff Mon Sep 17 00:00:00 2001
+From: BERADQ <adqber123@outlook.com>
+Date: Thu, 29 Jan 2026 05:14:30 +0800
+Subject: [PATCH 2/2] c/util: Request video_encode_av1 feature
+
+---
+ src/xrt/compositor/util/comp_vulkan.c | 1 +
+ 1 file changed, 1 insertion(+)
+
+diff --git a/src/xrt/compositor/util/comp_vulkan.c b/src/xrt/compositor/util/comp_vulkan.c
+index 9b3bceb87..c35199c44 100644
+--- a/src/xrt/compositor/util/comp_vulkan.c
++++ b/src/xrt/compositor/util/comp_vulkan.c
+@@ -283,6 +283,7 @@ create_device(struct vk_bundle *vk, const struct comp_vulkan_arguments *vk_args)
+ 	    .synchronization_2 = true,
+ 	    .present_wait = true,
+ 	    .video_maintenance_1 = true,
++	    .video_encode_av1 = true,
+ 	};
+ 
+ 	ret = vk_init_mutex(vk);
+-- 
+2.52.0
+
