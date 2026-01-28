@@ -45,6 +45,7 @@ class video_encoder_vulkan_av1 : public video_encoder_vulkan
 	StdVideoAV1Segmentation segmentation{};
 
 	StdVideoEncodeAV1PictureInfo std_picture_info{};
+	StdVideoEncodeAV1OperatingPointInfo operating_point{};
 	std::array<int32_t, VK_MAX_VIDEO_AV1_REFERENCES_PER_FRAME_KHR> reference_name_slot_indices{};
 	std::array<uint16_t, 2> mi_col_starts{};
 	std::array<uint16_t, 2> mi_row_starts{};
@@ -61,8 +62,9 @@ class video_encoder_vulkan_av1 : public video_encoder_vulkan
 	vk::VideoEncodeAV1RateControlLayerInfoKHR rate_control_layer_av1{};
 
 	vk::VideoEncodeAV1StdFlagsKHR std_flags{};
+	uint32_t single_reference_name_mask = 0;
 	uint32_t superblock_size = 64;
-	uint8_t order_hint_bits = 8;
+	uint8_t order_hint_bits = 7;
 
 	video_encoder_vulkan_av1(wivrn_vk_bundle & vk,
 	                         const vk::VideoCapabilitiesKHR & video_caps,
@@ -78,6 +80,10 @@ protected:
 
 	void * encode_info_next(uint32_t frame_num, size_t slot, std::optional<int32_t> ref_slot) override;
 	vk::ExtensionProperties std_header_version() override;
+	bool use_reference_slots() const override
+	{
+		return false;
+	}
 
 	void send_idr_data() override;
 

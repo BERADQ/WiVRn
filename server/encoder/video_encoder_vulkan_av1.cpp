@@ -109,17 +109,29 @@ wivrn::video_encoder_vulkan_av1::video_encoder_vulkan_av1(
 	        .delta_frame_id_length_minus_2 = 0,
 	        .additional_frame_id_length_minus_1 = 0,
 	        .order_hint_bits_minus_1 = static_cast<uint8_t>(order_hint_bits - 1),
-	        .seq_force_integer_mv = 0,
+	        .seq_force_integer_mv = STD_VIDEO_AV1_SELECT_INTEGER_MV,
 	        .seq_force_screen_content_tools = STD_VIDEO_AV1_SELECT_SCREEN_CONTENT_TOOLS,
 	        .reserved1 = {},
 	        .pColorConfig = &color_config,
 	        .pTimingInfo = nullptr,
 	};
 
+	operating_point = {};
+	operating_point.flags.decoder_model_present_for_this_op = 0;
+	operating_point.flags.low_delay_mode_flag = 1;
+	operating_point.flags.initial_display_delay_present_for_this_op = 0;
+	operating_point.operating_point_idc = 0;
+	operating_point.seq_level_idx = STD_VIDEO_AV1_LEVEL_2_0;
+	operating_point.seq_tier = 0;
+	operating_point.decoder_buffer_delay = 0;
+	operating_point.encoder_buffer_delay = 0;
+	operating_point.initial_display_delay_minus_1 = 0;
+
 	const uint32_t sb_cols = align_div(aligned_extent.width, superblock_size);
 	const uint32_t sb_rows = align_div(aligned_extent.height, superblock_size);
 	const uint32_t mi_cols = align_div(aligned_extent.width, 4);
 	const uint32_t mi_rows = align_div(aligned_extent.height, 4);
+	const bool uniform_tile_spacing = bool(std_flags & vk::VideoEncodeAV1StdFlagBitsKHR::eUniformTileSpacingFlagSet);
 
 	mi_col_starts = {0u, static_cast<uint16_t>(mi_cols)};
 	mi_row_starts = {0u, static_cast<uint16_t>(mi_rows)};
@@ -130,17 +142,17 @@ wivrn::video_encoder_vulkan_av1::video_encoder_vulkan_av1(
 
 	tile_info = {
 	        .flags = {
-	                .uniform_tile_spacing_flag = (std_flags & vk::VideoEncodeAV1StdFlagBitsKHR::eUniformTileSpacingFlagSet) ? 1u : 0u,
+	                .uniform_tile_spacing_flag = uniform_tile_spacing ? 1u : 0u,
 	        },
 	        .TileCols = 1,
 	        .TileRows = 1,
 	        .context_update_tile_id = 0,
 	        .tile_size_bytes_minus_1 = 0,
 	        .reserved1 = {},
-	        .pMiColStarts = mi_col_starts.data(),
-	        .pMiRowStarts = mi_row_starts.data(),
-	        .pWidthInSbsMinus1 = tile_widths_sb.data(),
-	        .pHeightInSbsMinus1 = tile_heights_sb.data(),
+	        .pMiColStarts = uniform_tile_spacing ? nullptr : mi_col_starts.data(),
+	        .pMiRowStarts = uniform_tile_spacing ? nullptr : mi_row_starts.data(),
+	        .pWidthInSbsMinus1 = uniform_tile_spacing ? nullptr : tile_widths_sb.data(),
+	        .pHeightInSbsMinus1 = uniform_tile_spacing ? nullptr : tile_heights_sb.data(),
 	};
 
 	quantization = {
@@ -148,7 +160,7 @@ wivrn::video_encoder_vulkan_av1::video_encoder_vulkan_av1(
 	                .using_qmatrix = 0,
 	                .diff_uv_delta = 0,
 	        },
-	        .base_q_idx = 128,
+	        .base_q_idx = static_cast<uint8_t>(encode_av1_caps.maxQIndex),
 	        .DeltaQYDc = 0,
 	        .DeltaQUDc = 0,
 	        .DeltaQUAc = 0,
@@ -207,6 +219,8 @@ void wivrn::video_encoder_vulkan_av1::configure_from_caps(const vk::VideoEncodeA
 		superblock_size = 64;
 	else
 		superblock_size = 128;
+
+	single_reference_name_mask = encode_av1_caps.singleReferenceNameMask;
 
 	rate_control_av1 = vk::VideoEncodeAV1RateControlInfoKHR{
 	        .flags = vk::VideoEncodeAV1RateControlFlagBitsKHR::eRegularGop,
@@ -328,6 +342,15 @@ std::unique_ptr<wivrn::video_encoder_vulkan_av1> wivrn::video_encoder_vulkan_av1
 		self->rate_control_av1.pNext = &self->gop_info;
 	}
 
+	self->operating_point.seq_level_idx = encode_av1_caps.maxLevel;
+	self->operating_point.seq_tier = 0;
+
+	if (encode_av1_caps.maxOperatingPoints > 0)
+	{
+		session_params_info.stdOperatingPointCount = 1;
+		session_params_info.pStdOperatingPoints = &self->operating_point;
+	}
+
 	self->init(video_caps, video_profile_info.get(), &session_create_info, &session_params_info);
 
 	return self;
@@ -335,26 +358,51 @@ std::unique_ptr<wivrn::video_encoder_vulkan_av1> wivrn::video_encoder_vulkan_av1
 
 void wivrn::video_encoder_vulkan_av1::send_idr_data()
 {
-	// AV1 sequence headers are emitted by the encoder as needed.
+	// Fetch encoded session parameters (sequence header OBU).
+	vk::VideoEncodeSessionParametersFeedbackInfoKHR feedback_info{};
+	auto data = get_encoded_parameters(&feedback_info);
+	if (!data.empty())
+		SendData(data, false, true);
 }
 
 void * wivrn::video_encoder_vulkan_av1::encode_info_next(uint32_t frame_num, size_t slot, std::optional<int32_t> ref_slot)
 {
-	const bool is_keyframe = !ref_slot;
+	const bool has_ref = ref_slot ? true : false;
+	const bool is_keyframe = !has_ref;
 
 	std::fill(reference_name_slot_indices.begin(), reference_name_slot_indices.end(), -1);
-	if (ref_slot)
-		reference_name_slot_indices[0] = *ref_slot;
+	int ref_name_index = 0;
+	if (single_reference_name_mask != 0)
+	{
+		if (single_reference_name_mask & 0x1u)
+		{
+			ref_name_index = 0;
+		}
+		else
+		{
+			for (int i = 0; i < int(reference_name_slot_indices.size()); ++i)
+			{
+				if (single_reference_name_mask & (1u << i))
+				{
+					ref_name_index = i;
+					break;
+				}
+			}
+		}
+	}
+	if (has_ref)
+		reference_name_slot_indices[ref_name_index] = *ref_slot;
 
 	std_picture_info = {};
-	std_picture_info.flags.error_resilient_mode = 0;
+	std_picture_info.flags.error_resilient_mode = is_keyframe ? 1u : 0u;
 	std_picture_info.flags.disable_cdf_update = 0;
 	std_picture_info.flags.use_superres = 0;
-	std_picture_info.flags.render_and_frame_size_different = (aligned_extent.width != extent.width || aligned_extent.height != extent.height);
-	std_picture_info.flags.allow_screen_content_tools = 1;
-	std_picture_info.flags.is_filter_switchable = 0;
+	const bool render_size_diff = (aligned_extent.width != extent.width || aligned_extent.height != extent.height);
+	std_picture_info.flags.render_and_frame_size_different = render_size_diff ? 1u : 0u;
+	std_picture_info.flags.allow_screen_content_tools = 0;
+	std_picture_info.flags.is_filter_switchable = 1;
 	std_picture_info.flags.force_integer_mv = 0;
-	std_picture_info.flags.frame_size_override_flag = 0;
+	std_picture_info.flags.frame_size_override_flag = render_size_diff ? 1u : 0u;
 	std_picture_info.flags.buffer_removal_time_present_flag = 0;
 	std_picture_info.flags.allow_intrabc = 0;
 	std_picture_info.flags.frame_refs_short_signaling = 0;
@@ -375,13 +423,13 @@ void * wivrn::video_encoder_vulkan_av1::encode_info_next(uint32_t frame_num, siz
 	std_picture_info.flags.UsesLr = 0;
 	std_picture_info.flags.usesChromaLr = 0;
 	std_picture_info.flags.show_frame = 1;
-	std_picture_info.flags.showable_frame = 1;
+	std_picture_info.flags.showable_frame = std_picture_info.flags.show_frame ? (is_keyframe ? 0u : 1u) : 1u;
 	std_picture_info.frame_type = is_keyframe ? STD_VIDEO_AV1_FRAME_TYPE_KEY : STD_VIDEO_AV1_FRAME_TYPE_INTER;
 	std_picture_info.frame_presentation_time = frame_num;
 	std_picture_info.current_frame_id = frame_num;
 	std_picture_info.order_hint = static_cast<uint8_t>(frame_num & ((1u << order_hint_bits) - 1));
-	std_picture_info.primary_ref_frame = ref_slot ? 0 : STD_VIDEO_AV1_PRIMARY_REF_NONE;
-	std_picture_info.refresh_frame_flags = static_cast<uint8_t>(is_keyframe ? 0xFF : 0x01);
+	std_picture_info.primary_ref_frame = (has_ref && (std_flags & vk::VideoEncodeAV1StdFlagBitsKHR::ePrimaryRefFrame)) ? uint8_t(ref_name_index) : STD_VIDEO_AV1_PRIMARY_REF_NONE;
+	std_picture_info.refresh_frame_flags = static_cast<uint8_t>(is_keyframe ? 0xFF : (1u << slot));
 	std_picture_info.coded_denom = 0;
 	std_picture_info.render_width_minus_1 = static_cast<uint16_t>(extent.width - 1);
 	std_picture_info.render_height_minus_1 = static_cast<uint16_t>(extent.height - 1);
@@ -392,26 +440,31 @@ void * wivrn::video_encoder_vulkan_av1::encode_info_next(uint32_t frame_num, siz
 	std::fill(std_picture_info.ref_order_hint, std_picture_info.ref_order_hint + STD_VIDEO_AV1_NUM_REF_FRAMES, 0);
 	std::fill(std_picture_info.ref_frame_idx, std_picture_info.ref_frame_idx + STD_VIDEO_AV1_REFS_PER_FRAME, static_cast<int8_t>(-1));
 	std::fill(std_picture_info.delta_frame_id_minus_1, std_picture_info.delta_frame_id_minus_1 + STD_VIDEO_AV1_REFS_PER_FRAME, 0);
-	std_picture_info.pTileInfo = &tile_info;
-	std_picture_info.pQuantization = &quantization;
-	std_picture_info.pSegmentation = &segmentation;
-	std_picture_info.pLoopFilter = &loop_filter;
-	std_picture_info.pCDEF = &cdef;
-	std_picture_info.pLoopRestoration = &loop_restoration;
+	std_picture_info.pTileInfo = nullptr;
+	std_picture_info.pQuantization = nullptr;
+	std_picture_info.pSegmentation = nullptr;
+	std_picture_info.pLoopFilter = nullptr;
+	std_picture_info.pCDEF = nullptr;
+	std_picture_info.pLoopRestoration = nullptr;
 	std_picture_info.pGlobalMotion = &global_motion;
 	std_picture_info.pExtensionHeader = nullptr;
 	std_picture_info.pBufferRemovalTimes = nullptr;
 
-	if (ref_slot)
-		std_picture_info.ref_frame_idx[0] = 0;
+	if (has_ref)
+		std_picture_info.ref_frame_idx[ref_name_index] = static_cast<int8_t>(*ref_slot);
 
-	if (ref_slot)
-	{
-		const auto & ref_info = dpb_std_info[*ref_slot];
-		std_picture_info.ref_order_hint[0] = ref_info.OrderHint;
-	}
+	const size_t dpb_ref_count = std::min<size_t>(dpb_std_info.size(), STD_VIDEO_AV1_NUM_REF_FRAMES);
+	for (size_t i = 0; i < dpb_ref_count; ++i)
+		std_picture_info.ref_order_hint[i] = dpb_std_info[i].OrderHint;
 
 	picture_info = vk::VideoEncodeAV1PictureInfoKHR{};
+	bool primary_ref_cdf_only = true;
+	if (std_picture_info.primary_ref_frame != STD_VIDEO_AV1_PRIMARY_REF_NONE)
+	{
+		if (reference_name_slot_indices[std_picture_info.primary_ref_frame] != -1)
+			primary_ref_cdf_only = false;
+	}
+
 	picture_info.predictionMode = is_keyframe ? vk::VideoEncodeAV1PredictionModeKHR::eIntraOnly
 	                                          : vk::VideoEncodeAV1PredictionModeKHR::eSingleReference;
 	picture_info.rateControlGroup = is_keyframe ? vk::VideoEncodeAV1RateControlGroupKHR::eIntra
@@ -419,7 +472,7 @@ void * wivrn::video_encoder_vulkan_av1::encode_info_next(uint32_t frame_num, siz
 	picture_info.constantQIndex = 0;
 	picture_info.pStdPictureInfo = &std_picture_info;
 	picture_info.referenceNameSlotIndices = reference_name_slot_indices;
-	picture_info.primaryReferenceCdfOnly = VK_FALSE;
+	picture_info.primaryReferenceCdfOnly = primary_ref_cdf_only ? VK_TRUE : VK_FALSE;
 	picture_info.generateObuExtensionHeader = VK_FALSE;
 
 	auto & i = dpb_std_info[slot];
@@ -437,7 +490,7 @@ void * wivrn::video_encoder_vulkan_av1::encode_info_next(uint32_t frame_num, siz
 vk::ExtensionProperties wivrn::video_encoder_vulkan_av1::std_header_version()
 {
 	vk::ExtensionProperties std_header_version{
-	        .specVersion = VK_MAKE_VIDEO_STD_VERSION(1, 0, 0),
+	        .specVersion = VK_STD_VULKAN_VIDEO_CODEC_AV1_ENCODE_SPEC_VERSION,
 	};
 	strcpy(std_header_version.extensionName,
 	       VK_STD_VULKAN_VIDEO_CODEC_AV1_ENCODE_EXTENSION_NAME);

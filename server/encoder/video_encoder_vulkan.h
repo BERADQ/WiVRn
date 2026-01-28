@@ -93,6 +93,10 @@ protected:
 	virtual std::vector<void *> setup_slot_info(size_t dpb_size) = 0;
 	virtual void * encode_info_next(uint32_t frame_num, size_t slot, std::optional<int32_t> reference_slot) = 0;
 	virtual vk::ExtensionProperties std_header_version() = 0;
+	virtual bool use_reference_slots() const
+	{
+		return true;
+	}
 
 public:
 	std::optional<data> encode(uint8_t slot, uint64_t frame_index) override;

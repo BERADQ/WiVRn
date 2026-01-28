@@ -535,10 +535,12 @@ wivrn::video_encoder_vulkan::~video_encoder_vulkan()
 
 std::vector<uint8_t> wivrn::video_encoder_vulkan::get_encoded_parameters(void * next)
 {
-	auto [feedback, encoded] = vk.device.getEncodedVideoSessionParametersKHR({
-	        .pNext = next,
+	vk::VideoEncodeSessionParametersGetInfoKHR get_info{
 	        .videoSessionParameters = *video_session_parameters,
-	});
+	};
+	get_info.pNext = next;
+
+	auto [feedback, encoded] = vk.device.getEncodedVideoSessionParametersKHR(get_info);
 	return encoded;
 }
 
@@ -725,12 +727,11 @@ std::pair<bool, vk::Semaphore> wivrn::video_encoder_vulkan::present_image(vk::Im
 	auto [ref_slot, slot] = dpb.get_ref(frame_index);
 	slot_item.idr = ref_slot == nullptr;
 
-	vk::VideoReferenceSlotInfoKHR init_refs[2] = {};
-	init_refs[0] = slot->info;
+	const bool begin_use_refs = static_cast<bool>(ref_slot);
+	std::array<vk::VideoReferenceSlotInfoKHR, 2> init_refs{};
 	init_refs[0].slotIndex = -1;
 	init_refs[0].pPictureResource = &slot->resource;
-
-	if (ref_slot)
+	if (begin_use_refs)
 	{
 		init_refs[1] = ref_slot->info;
 		init_refs[1].slotIndex = ref_slot->info.slotIndex;
@@ -741,8 +742,8 @@ std::pair<bool, vk::Semaphore> wivrn::video_encoder_vulkan::present_image(vk::Im
 	        .pNext = (session_initialized and rate_control) ? &rate_control.value() : nullptr,
 	        .videoSession = *video_session,
 	        .videoSessionParameters = *video_session_parameters,
-	        .referenceSlotCount = ref_slot ? 2u : 1u,
-	        .pReferenceSlots = init_refs,
+	        .referenceSlotCount = begin_use_refs ? 2u : 1u,
+	        .pReferenceSlots = init_refs.data(),
 	});
 
 	size_t slot_index = std::distance(dpb.items.data(), slot);
@@ -828,7 +829,15 @@ std::pair<bool, vk::Semaphore> wivrn::video_encoder_vulkan::present_image(vk::Im
 	};
 
 	if (ref_slot)
-		encode_info.setReferenceSlots(ref_slot->info);
+	{
+		encode_info.referenceSlotCount = 1;
+		encode_info.pReferenceSlots = &ref_slot->info;
+	}
+	else
+	{
+		encode_info.referenceSlotCount = 0;
+		encode_info.pReferenceSlots = nullptr;
+	}
 
 	video_cmd_buf.beginQuery(*query_pool, encode_slot, {});
 	video_cmd_buf.encodeVideoKHR(encode_info);
