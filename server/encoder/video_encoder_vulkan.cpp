@@ -451,10 +451,12 @@ void wivrn::video_encoder_vulkan::init(const vk::VideoCapabilitiesKHR & video_ca
 
 	// video session parameters
 	{
+		U_LOG_D("Vulkan: Creating video session parameters");
 		video_session_parameters = vk.device.createVideoSessionParametersKHR({
 		        .pNext = session_params_next,
 		        .videoSession = *video_session,
 		});
+		U_LOG_D("Vulkan: Video session parameters created");
 	}
 
 	// fence, semaphore
@@ -481,9 +483,10 @@ void wivrn::video_encoder_vulkan::init(const vk::VideoCapabilitiesKHR & video_ca
 		                        vk::VideoEncodeFeedbackFlagBitsKHR::eBitstreamBytesWritten,
 		        },
 		};
-
+		U_LOG_D("Vulkan: Creating query pool with video_profile pNext=%p, flags=0x%x", &video_profile, vk::VideoEncodeFeedbackFlagBitsKHR::eBitstreamBufferOffset | vk::VideoEncodeFeedbackFlagBitsKHR::eBitstreamBytesWritten);
 		query_pool = vk.device.createQueryPool(query_pool_create.get());
 		vk.name(query_pool, "vulkan encoder query pool");
+		U_LOG_D("Vulkan: Query pool created successfully");
 	}
 
 	// command pools
@@ -533,34 +536,81 @@ wivrn::video_encoder_vulkan::~video_encoder_vulkan()
 {
 }
 
-std::vector<uint8_t> wivrn::video_encoder_vulkan::get_encoded_parameters(void * next)
+std::pair<vk::VideoEncodeSessionParametersFeedbackInfoKHR, std::vector<uint8_t>> wivrn::video_encoder_vulkan::get_encoded_parameters(void * next)
 {
+	if (!*video_session_parameters)
+	{
+		U_LOG_E("Vulkan: video_session_parameters is null!");
+		return {};
+	}
 	vk::VideoEncodeSessionParametersGetInfoKHR get_info{
 	        .videoSessionParameters = *video_session_parameters,
 	};
 	get_info.pNext = next;
 
+	U_LOG_D("Vulkan: Calling getEncodedVideoSessionParametersKHR");
 	auto [feedback, encoded] = vk.device.getEncodedVideoSessionParametersKHR(get_info);
-	return encoded;
+	U_LOG_D("Vulkan: getEncodedVideoSessionParametersKHR returned %zu bytes, feedback: hasOverrides=%u", encoded.size(), feedback.hasOverrides);
+	return {feedback, encoded};
 }
 
 std::optional<wivrn::video_encoder::data> wivrn::video_encoder_vulkan::encode(uint8_t encode_slot, uint64_t frame_index)
 {
+	U_LOG_D("Vulkan: encode(slot=%u, frame=%lu) starting", encode_slot, frame_index);
 	auto & slot_item = slot_data[encode_slot];
+	U_LOG_D("Vulkan: encode: slot_item.idr=%u", slot_item.idr);
 	if (slot_item.idr)
 		send_idr_data();
 
+	U_LOG_D("Vulkan: encode: waiting for fence...");
 	if (auto res = vk.device.waitForFences(*slot_item.fence, true, 1'000'000'000);
 	    res != vk::Result::eSuccess)
 	{
+		U_LOG_E("Vulkan: encode: waitForFences failed: %s", vk::to_string(res).c_str());
 		throw std::runtime_error("wait for fences: " + vk::to_string(res));
 	}
+	U_LOG_D("Vulkan: encode: fence wait completed");
 
-	// Feedback = offset / size / has overrides
-	auto [res, feedback] = query_pool.getResults<uint32_t>(encode_slot, 1, 3 * sizeof(uint32_t), 0, vk::QueryResultFlagBits::eWait);
-	if (res != vk::Result::eSuccess)
+	// Feedback = offset / size / flags / status
+	U_LOG_D("Vulkan: encode: getting query pool results for slot=%u", encode_slot);
+	std::vector<uint32_t> feedback;
+	vk::Result res;
+	try
 	{
-		std::cerr << "device.getQueryPoolResults: " << vk::to_string(res) << std::endl;
+		auto [result, data] = query_pool.getResults<uint32_t>(encode_slot, 1, 4 * sizeof(uint32_t), 0, vk::QueryResultFlagBits::eWait | vk::QueryResultFlagBits::eWithStatusKHR);
+		res = result;
+		feedback = data;
+		if (res != vk::Result::eSuccess)
+		{
+			U_LOG_E("Vulkan: encode: device.getQueryPoolResults failed: %s", vk::to_string(res).c_str());
+			std::cerr << "device.getQueryPoolResults: " << vk::to_string(res) << std::endl;
+		}
+		else
+		{
+			U_LOG_D("Vulkan: encode: query pool results ok");
+		}
+		if (!feedback.empty())
+		{
+			U_LOG_D("Vulkan: encode() query results: offset=%u, size=%u, flags=%u, status=%u", feedback[0], feedback[1], feedback[2], feedback[3]);
+			if (feedback.size() >= 4 && feedback[3] != VK_QUERY_RESULT_STATUS_COMPLETE_KHR)
+			{
+				U_LOG_E("Vulkan: encode: query status not complete: %u", feedback[3]);
+			}
+		}
+		else
+		{
+			U_LOG_W("Vulkan: encode: query pool returned empty feedback");
+		}
+	}
+	catch (const std::exception & e)
+	{
+		U_LOG_E("Vulkan: encode: getResults exception: %s", e.what());
+		throw;
+	}
+	catch (...)
+	{
+		U_LOG_E("Vulkan: encode: getResults unknown exception");
+		throw;
 	}
 
 	void * mapped = slot_item.host_buffer ? slot_item.host_buffer.map() : slot_item.output_buffer.map();
@@ -576,8 +626,10 @@ std::pair<bool, vk::Semaphore> wivrn::video_encoder_vulkan::present_image(vk::Im
 {
 	auto & slot_item = slot_data[encode_slot];
 	auto & video_cmd_buf = slot_item.video_cmd_buf;
+	U_LOG_D("Vulkan: present_image: Resetting and beginning command buffer");
 	video_cmd_buf.reset();
 	video_cmd_buf.begin({.flags = vk::CommandBufferUsageFlagBits::eOneTimeSubmit});
+	U_LOG_D("Vulkan: present_image: Command buffer recording started");
 
 	// If we encode from top left corner, encode from the source image directly
 	bool encode_direct = not slot_item.tmp_image;
@@ -738,6 +790,7 @@ std::pair<bool, vk::Semaphore> wivrn::video_encoder_vulkan::present_image(vk::Im
 		init_refs[1].pPictureResource = &ref_slot->resource;
 	}
 
+	U_LOG_D("Vulkan: present_image: Calling beginVideoCodingKHR with session_initialized=%u, rate_control=%u, referenceSlotCount=%u", session_initialized, rate_control.has_value(), begin_use_refs ? 2u : 1u);
 	video_cmd_buf.beginVideoCodingKHR({
 	        .pNext = (session_initialized and rate_control) ? &rate_control.value() : nullptr,
 	        .videoSession = *video_session,
@@ -745,6 +798,7 @@ std::pair<bool, vk::Semaphore> wivrn::video_encoder_vulkan::present_image(vk::Im
 	        .referenceSlotCount = begin_use_refs ? 2u : 1u,
 	        .pReferenceSlots = init_refs.data(),
 	});
+	U_LOG_D("Vulkan: present_image: beginVideoCodingKHR completed");
 
 	size_t slot_index = std::distance(dpb.items.data(), slot);
 	slot->info.slotIndex = slot_index;
@@ -760,7 +814,9 @@ std::pair<bool, vk::Semaphore> wivrn::video_encoder_vulkan::present_image(vk::Im
 			control_info.flags |= vk::VideoCodingControlFlagBitsKHR::eEncodeRateControl;
 			control_info.pNext = &rate_control.value();
 		}
+		U_LOG_D("Vulkan: present_image: Calling controlVideoCodingKHR with flags=0x%x, rate_control=%u", static_cast<uint32_t>(control_info.flags), rate_control.has_value());
 		video_cmd_buf.controlVideoCodingKHR(control_info);
+		U_LOG_D("Vulkan: present_image: controlVideoCodingKHR completed");
 
 		// Set decoded picture buffer to correct layout
 		vk::ImageMemoryBarrier2 dpb_barrier{
@@ -839,10 +895,13 @@ std::pair<bool, vk::Semaphore> wivrn::video_encoder_vulkan::present_image(vk::Im
 		encode_info.pReferenceSlots = nullptr;
 	}
 
+	U_LOG_D("Vulkan: present_image: Starting encodeVideoKHR for slot=%u", encode_slot);
 	video_cmd_buf.beginQuery(*query_pool, encode_slot, {});
 	video_cmd_buf.encodeVideoKHR(encode_info);
+	U_LOG_D("Vulkan: present_image: encodeVideoKHR completed for slot=%u", encode_slot);
 	video_cmd_buf.endQuery(*query_pool, encode_slot);
 	video_cmd_buf.endVideoCodingKHR(vk::VideoEndCodingInfoKHR{});
+	U_LOG_D("Vulkan: present_image: endVideoCodingKHR completed");
 
 	// When output buffer is not visible, we have to issue a transfer operation
 	if (slot_item.host_buffer)
@@ -909,7 +968,9 @@ std::pair<bool, vk::Semaphore> wivrn::video_encoder_vulkan::present_image(vk::Im
 		}
 	}
 
+	U_LOG_D("Vulkan: present_image: Ending command buffer recording");
 	video_cmd_buf.end();
+	U_LOG_D("Vulkan: present_image: Command buffer recording ended");
 
 	++dpb.frame_num;
 
@@ -921,6 +982,7 @@ void wivrn::video_encoder_vulkan::post_submit(uint8_t slot)
 {
 	auto & slot_item = slot_data[slot];
 	const bool need_transfer = *slot_item.transfer_cmd_buf and slot_item.host_buffer;
+	U_LOG_D("Vulkan: post_submit(slot=%u) starting, need_transfer=%u", slot, need_transfer);
 	// Issue encode command, and if necessary transfer command
 	vk.device.resetFences(*slot_item.fence);
 	vk::SemaphoreSubmitInfo wait_sem_info{
@@ -935,26 +997,43 @@ void wivrn::video_encoder_vulkan::post_submit(uint8_t slot)
 	        .commandBuffer = slot_item.video_cmd_buf,
 	};
 
-	vk.encode_queue.submit2(vk::SubmitInfo2{
-	                                .waitSemaphoreInfoCount = 1,
-	                                .pWaitSemaphoreInfos = &wait_sem_info,
-	                                .commandBufferInfoCount = 1,
-	                                .pCommandBufferInfos = &cmd_info,
-	                                .signalSemaphoreInfoCount = need_transfer ? 1u : 0,
-	                                .pSignalSemaphoreInfos = &sem_info,
-	                        },
-	                        need_transfer ? nullptr : *slot_item.fence);
+	try
+	{
+		vk.encode_queue.submit2(vk::SubmitInfo2{
+		                                .waitSemaphoreInfoCount = 1,
+		                                .pWaitSemaphoreInfos = &wait_sem_info,
+		                                .commandBufferInfoCount = 1,
+		                                .pCommandBufferInfos = &cmd_info,
+		                                .signalSemaphoreInfoCount = need_transfer ? 1u : 0,
+		                                .pSignalSemaphoreInfos = &sem_info,
+		                        },
+		                        need_transfer ? nullptr : *slot_item.fence);
+	}
+	catch (const std::exception & e)
+	{
+		U_LOG_E("Vulkan: post_submit: encode queue submit2 failed: %s", e.what());
+		throw;
+	}
 	if (need_transfer)
 	{
-		vk::CommandBufferSubmitInfo cmd_info{
-		        .commandBuffer = slot_item.transfer_cmd_buf,
-		};
-		vk.queue.submit2(vk::SubmitInfo2{
-		                         .waitSemaphoreInfoCount = 1,
-		                         .pWaitSemaphoreInfos = &sem_info,
-		                         .commandBufferInfoCount = 1,
-		                         .pCommandBufferInfos = &cmd_info,
-		                 },
-		                 *slot_item.fence);
+		try
+		{
+			vk::CommandBufferSubmitInfo cmd_info{
+			        .commandBuffer = slot_item.transfer_cmd_buf,
+			};
+			vk.queue.submit2(vk::SubmitInfo2{
+			                         .waitSemaphoreInfoCount = 1,
+			                         .pWaitSemaphoreInfos = &sem_info,
+			                         .commandBufferInfoCount = 1,
+			                         .pCommandBufferInfos = &cmd_info,
+			                 },
+			                 *slot_item.fence);
+		}
+		catch (const std::exception & e)
+		{
+			U_LOG_E("Vulkan: post_submit: transfer queue submit2 failed: %s", e.what());
+			throw;
+		}
 	}
+	U_LOG_D("Vulkan: post_submit(slot=%u) completed", slot);
 }

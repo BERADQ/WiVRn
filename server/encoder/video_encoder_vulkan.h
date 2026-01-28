@@ -86,7 +86,7 @@ protected:
 
 	virtual ~video_encoder_vulkan();
 
-	std::vector<uint8_t> get_encoded_parameters(void * next);
+	std::pair<vk::VideoEncodeSessionParametersFeedbackInfoKHR, std::vector<uint8_t>> get_encoded_parameters(void * next);
 
 	virtual void send_idr_data() = 0;
 

@@ -348,7 +348,7 @@ std::vector<uint8_t> wivrn::video_encoder_vulkan_h265::get_vps_sps_pps()
 	        .stdSPSId = 0,
 	        .stdPPSId = 0,
 	};
-	return get_encoded_parameters(&next);
+	return get_encoded_parameters(&next).second;
 }
 
 void wivrn::video_encoder_vulkan_h265::send_idr_data()

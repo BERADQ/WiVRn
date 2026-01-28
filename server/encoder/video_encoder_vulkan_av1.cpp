@@ -18,6 +18,7 @@
 #include "video_encoder_vulkan_av1.h"
 
 #include "encoder/encoder_settings.h"
+#include "util/u_logging.h"
 #include "utils/wivrn_vk_bundle.h"
 
 #include <algorithm>
@@ -214,6 +215,17 @@ wivrn::video_encoder_vulkan_av1::video_encoder_vulkan_av1(
 
 void wivrn::video_encoder_vulkan_av1::configure_from_caps(const vk::VideoEncodeAV1CapabilitiesKHR & encode_av1_caps)
 {
+	U_LOG_D("AV1: capabilities: stdSyntaxFlags=0x%x, superblockSizes=0x%x, singleReferenceNameMask=0x%x, maxSingleReferenceCount=%u, maxUnidirectionalCompoundReferenceCount=%u, maxBidirectionalCompoundReferenceCount=%u, maxQIndex=%u, minQIndex=%u, requiresGopRemainingFrames=%u, maxOperatingPoints=%u",
+	        static_cast<uint32_t>(encode_av1_caps.stdSyntaxFlags),
+	        static_cast<uint32_t>(encode_av1_caps.superblockSizes),
+	        encode_av1_caps.singleReferenceNameMask,
+	        encode_av1_caps.maxSingleReferenceCount,
+	        encode_av1_caps.maxUnidirectionalCompoundReferenceCount,
+	        encode_av1_caps.maxBidirectionalCompoundReferenceCount,
+	        encode_av1_caps.maxQIndex,
+	        encode_av1_caps.minQIndex,
+	        encode_av1_caps.requiresGopRemainingFrames,
+	        encode_av1_caps.maxOperatingPoints);
 	std_flags = encode_av1_caps.stdSyntaxFlags;
 	if (encode_av1_caps.superblockSizes & vk::VideoEncodeAV1SuperblockSizeFlagBitsKHR::e64)
 		superblock_size = 64;
@@ -221,6 +233,11 @@ void wivrn::video_encoder_vulkan_av1::configure_from_caps(const vk::VideoEncodeA
 		superblock_size = 128;
 
 	single_reference_name_mask = encode_av1_caps.singleReferenceNameMask;
+	max_single_reference_count = encode_av1_caps.maxSingleReferenceCount;
+	max_unidirectional_compound_reference_count = encode_av1_caps.maxUnidirectionalCompoundReferenceCount;
+	max_bidirectional_compound_reference_count = encode_av1_caps.maxBidirectionalCompoundReferenceCount;
+	max_q_index = encode_av1_caps.maxQIndex;
+	min_q_index = encode_av1_caps.minQIndex;
 
 	rate_control_av1 = vk::VideoEncodeAV1RateControlInfoKHR{
 	        .flags = vk::VideoEncodeAV1RateControlFlagBitsKHR::eRegularGop,
@@ -326,6 +343,11 @@ std::unique_ptr<wivrn::video_encoder_vulkan_av1> wivrn::video_encoder_vulkan_av1
 	        .pStdOperatingPoints = nullptr,
 	};
 
+	self->quality_level_info = vk::VideoEncodeQualityLevelInfoKHR{
+	        .qualityLevel = 0, // Use default quality level
+	};
+	session_params_info.pNext = &self->quality_level_info;
+
 	vk::VideoEncodeAV1SessionCreateInfoKHR session_create_info{
 	        .useMaxLevel = false,
 	        .maxLevel = encode_av1_caps.maxLevel,
@@ -358,40 +380,64 @@ std::unique_ptr<wivrn::video_encoder_vulkan_av1> wivrn::video_encoder_vulkan_av1
 
 void wivrn::video_encoder_vulkan_av1::send_idr_data()
 {
+	U_LOG_D("AV1: send_idr_data() called");
 	// Fetch encoded session parameters (sequence header OBU).
-	vk::VideoEncodeSessionParametersFeedbackInfoKHR feedback_info{};
-	auto data = get_encoded_parameters(&feedback_info);
-	if (!data.empty())
-		SendData(data, false, true);
+	try
+	{
+		auto [feedback, data] = get_encoded_parameters(nullptr);
+		U_LOG_D("AV1: get_encoded_parameters returned %zu bytes, feedback.hasOverrides=%u", data.size(), feedback.hasOverrides);
+		if (!data.empty())
+			SendData(data, false, true);
+		else
+			U_LOG_W("AV1: get_encoded_parameters returned empty data");
+	}
+	catch (const std::exception & e)
+	{
+		U_LOG_E("AV1: Exception in get_encoded_parameters: %s", e.what());
+	}
+	catch (...)
+	{
+		U_LOG_E("AV1: Unknown exception in get_encoded_parameters");
+	}
 }
 
 void * wivrn::video_encoder_vulkan_av1::encode_info_next(uint32_t frame_num, size_t slot, std::optional<int32_t> ref_slot)
 {
+	U_LOG_D("AV1: encode_info_next frame=%u slot=%zu ref_slot=%s",
+	        frame_num,
+	        slot,
+	        ref_slot ? std::to_string(*ref_slot).c_str() : "none");
 	const bool has_ref = ref_slot ? true : false;
 	const bool is_keyframe = !has_ref;
 
+	// Initialize reference name slot indices to -1 (no reference)
 	std::fill(reference_name_slot_indices.begin(), reference_name_slot_indices.end(), -1);
-	int ref_name_index = 0;
-	if (single_reference_name_mask != 0)
+
+	// Determine which reference name to use based on hardware capabilities
+	// For single reference frames, use LAST_FRAME (index 0) as per AV1 standard
+	int ref_name_index = 0; // STD_VIDEO_AV1_REFERENCE_NAME_LAST_FRAME
+
+	// Check if hardware supports LAST_FRAME reference name
+	// single_reference_name_mask bit 0 should be set for LAST_FRAME
+	if (single_reference_name_mask != 0 && !(single_reference_name_mask & 0x1u))
 	{
-		if (single_reference_name_mask & 0x1u)
+		// LAST_FRAME not supported, find first valid reference name
+		U_LOG_W("AV1: LAST_FRAME reference name not supported by hardware, mask=0x%x", single_reference_name_mask);
+		for (int i = 0; i < int(reference_name_slot_indices.size()); ++i)
 		{
-			ref_name_index = 0;
-		}
-		else
-		{
-			for (int i = 0; i < int(reference_name_slot_indices.size()); ++i)
+			if (single_reference_name_mask & (1u << i))
 			{
-				if (single_reference_name_mask & (1u << i))
-				{
-					ref_name_index = i;
-					break;
-				}
+				ref_name_index = i;
+				U_LOG_W("AV1: Using reference name index %d instead", i);
+				break;
 			}
 		}
 	}
+
+	// Set the reference slot index for the chosen reference name
+	// Use LAST_FRAME as the reference name index (0)
 	if (has_ref)
-		reference_name_slot_indices[ref_name_index] = *ref_slot;
+		reference_name_slot_indices[0] = *ref_slot; // LAST_FRAME at index 0
 
 	std_picture_info = {};
 	std_picture_info.flags.error_resilient_mode = is_keyframe ? 1u : 0u;
@@ -428,7 +474,17 @@ void * wivrn::video_encoder_vulkan_av1::encode_info_next(uint32_t frame_num, siz
 	std_picture_info.frame_presentation_time = frame_num;
 	std_picture_info.current_frame_id = frame_num;
 	std_picture_info.order_hint = static_cast<uint8_t>(frame_num & ((1u << order_hint_bits) - 1));
-	std_picture_info.primary_ref_frame = (has_ref && (std_flags & vk::VideoEncodeAV1StdFlagBitsKHR::ePrimaryRefFrame)) ? uint8_t(ref_name_index) : STD_VIDEO_AV1_PRIMARY_REF_NONE;
+	// Set primary reference frame for CDF updates
+	// Only set primary_ref_frame if the codec supports it (indicated by std_flags)
+	// Otherwise, set to STD_VIDEO_AV1_PRIMARY_REF_NONE
+	if (has_ref && (std_flags & vk::VideoEncodeAV1StdFlagBitsKHR::ePrimaryRefFrame))
+	{
+		std_picture_info.primary_ref_frame = uint8_t(ref_name_index);
+	}
+	else
+	{
+		std_picture_info.primary_ref_frame = STD_VIDEO_AV1_PRIMARY_REF_NONE;
+	}
 	std_picture_info.refresh_frame_flags = static_cast<uint8_t>(is_keyframe ? 0xFF : (1u << slot));
 	std_picture_info.coded_denom = 0;
 	std_picture_info.render_width_minus_1 = static_cast<uint16_t>(extent.width - 1);
@@ -440,18 +496,18 @@ void * wivrn::video_encoder_vulkan_av1::encode_info_next(uint32_t frame_num, siz
 	std::fill(std_picture_info.ref_order_hint, std_picture_info.ref_order_hint + STD_VIDEO_AV1_NUM_REF_FRAMES, 0);
 	std::fill(std_picture_info.ref_frame_idx, std_picture_info.ref_frame_idx + STD_VIDEO_AV1_REFS_PER_FRAME, static_cast<int8_t>(-1));
 	std::fill(std_picture_info.delta_frame_id_minus_1, std_picture_info.delta_frame_id_minus_1 + STD_VIDEO_AV1_REFS_PER_FRAME, 0);
-	std_picture_info.pTileInfo = nullptr;
-	std_picture_info.pQuantization = nullptr;
-	std_picture_info.pSegmentation = nullptr;
-	std_picture_info.pLoopFilter = nullptr;
-	std_picture_info.pCDEF = nullptr;
-	std_picture_info.pLoopRestoration = nullptr;
+	std_picture_info.pTileInfo = &tile_info;
+	std_picture_info.pQuantization = &quantization;
+	std_picture_info.pSegmentation = (std_picture_info.flags.segmentation_enabled) ? &segmentation : nullptr;
+	std_picture_info.pLoopFilter = &loop_filter;
+	std_picture_info.pCDEF = &cdef;
+	std_picture_info.pLoopRestoration = &loop_restoration;
 	std_picture_info.pGlobalMotion = &global_motion;
 	std_picture_info.pExtensionHeader = nullptr;
 	std_picture_info.pBufferRemovalTimes = nullptr;
 
 	if (has_ref)
-		std_picture_info.ref_frame_idx[ref_name_index] = static_cast<int8_t>(*ref_slot);
+		std_picture_info.ref_frame_idx[0] = static_cast<int8_t>(*ref_slot); // LAST_FRAME at index 0
 
 	const size_t dpb_ref_count = std::min<size_t>(dpb_std_info.size(), STD_VIDEO_AV1_NUM_REF_FRAMES);
 	for (size_t i = 0; i < dpb_ref_count; ++i)
@@ -459,17 +515,57 @@ void * wivrn::video_encoder_vulkan_av1::encode_info_next(uint32_t frame_num, siz
 
 	picture_info = vk::VideoEncodeAV1PictureInfoKHR{};
 	bool primary_ref_cdf_only = true;
-	if (std_picture_info.primary_ref_frame != STD_VIDEO_AV1_PRIMARY_REF_NONE)
+	if (std_picture_info.primary_ref_frame == STD_VIDEO_AV1_PRIMARY_REF_NONE)
+	{
+		primary_ref_cdf_only = false;
+	}
+	else
 	{
 		if (reference_name_slot_indices[std_picture_info.primary_ref_frame] != -1)
 			primary_ref_cdf_only = false;
 	}
 
-	picture_info.predictionMode = is_keyframe ? vk::VideoEncodeAV1PredictionModeKHR::eIntraOnly
-	                                          : vk::VideoEncodeAV1PredictionModeKHR::eSingleReference;
+	// Determine prediction mode based on frame type and hardware capabilities
+	// Following NVIDIA's reference implementation logic
+	vk::VideoEncodeAV1PredictionModeKHR prediction_mode;
+	if (is_keyframe)
+	{
+		prediction_mode = vk::VideoEncodeAV1PredictionModeKHR::eIntraOnly;
+	}
+	else
+	{
+		// WiVRn currently supports only single reference frames
+		// For inter frames, use SINGLE_REFERENCE as default
+		prediction_mode = vk::VideoEncodeAV1PredictionModeKHR::eSingleReference;
+	}
+
+	// Apply hardware capability fallbacks like NVIDIA's implementation
+	if (prediction_mode == vk::VideoEncodeAV1PredictionModeKHR::eBidirectionalCompound &&
+	    max_bidirectional_compound_reference_count == 0)
+	{
+		// Fall back to unidirectional compound if bidirectional not supported
+		prediction_mode = vk::VideoEncodeAV1PredictionModeKHR::eUnidirectionalCompound;
+	}
+	if (prediction_mode == vk::VideoEncodeAV1PredictionModeKHR::eUnidirectionalCompound &&
+	    max_unidirectional_compound_reference_count == 0)
+	{
+		// Fall back to single reference if unidirectional compound not supported
+		prediction_mode = vk::VideoEncodeAV1PredictionModeKHR::eSingleReference;
+	}
+	if (prediction_mode == vk::VideoEncodeAV1PredictionModeKHR::eSingleReference &&
+	    max_single_reference_count == 0)
+	{
+		// Fall back to intra-only if single reference not supported
+		prediction_mode = vk::VideoEncodeAV1PredictionModeKHR::eIntraOnly;
+	}
+
+	picture_info.predictionMode = prediction_mode;
+
+	// Set rate control group based on frame type
+	// Note: WiVRn currently doesn't support B-frames, so only INTRA and PREDICTIVE groups
 	picture_info.rateControlGroup = is_keyframe ? vk::VideoEncodeAV1RateControlGroupKHR::eIntra
 	                                            : vk::VideoEncodeAV1RateControlGroupKHR::ePredictive;
-	picture_info.constantQIndex = 0;
+	picture_info.constantQIndex = 0; // Ignored when rate control is enabled
 	picture_info.pStdPictureInfo = &std_picture_info;
 	picture_info.referenceNameSlotIndices = reference_name_slot_indices;
 	picture_info.primaryReferenceCdfOnly = primary_ref_cdf_only ? VK_TRUE : VK_FALSE;
@@ -483,6 +579,13 @@ void * wivrn::video_encoder_vulkan_av1::encode_info_next(uint32_t frame_num, siz
 	i.frame_type = std_picture_info.frame_type;
 	i.OrderHint = std_picture_info.order_hint;
 	i.pExtensionHeader = nullptr;
+
+	U_LOG_D("AV1: encode_info_next done: frame_type=%u, prediction_mode=%u, rate_control_group=%u, primary_ref_frame=%u, primary_ref_cdf_only=%u",
+	        std_picture_info.frame_type,
+	        static_cast<uint32_t>(picture_info.predictionMode),
+	        static_cast<uint32_t>(picture_info.rateControlGroup),
+	        std_picture_info.primary_ref_frame,
+	        picture_info.primaryReferenceCdfOnly);
 
 	return &picture_info;
 }

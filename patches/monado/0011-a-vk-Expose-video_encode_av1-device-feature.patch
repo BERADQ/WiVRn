@@ -1,0 +1,146 @@
+From 719c381cd2c0e1836249151e689e95bd263bb0f1 Mon Sep 17 00:00:00 2001
+From: BERADQ <adqber123@outlook.com>
+Date: Thu, 29 Jan 2026 04:13:21 +0800
+Subject: [PATCH 11/11] a/vk: Expose video_encode_av1 device feature
+
+---
+ src/xrt/auxiliary/vk/vk_bundle_init.c         | 39 ++++++++++++++++++-
+ src/xrt/auxiliary/vk/vk_generate_inc_files.py |  2 +
+ src/xrt/auxiliary/vk/vk_helpers.h             |  2 +
+ 3 files changed, 41 insertions(+), 2 deletions(-)
+
+diff --git a/src/xrt/auxiliary/vk/vk_bundle_init.c b/src/xrt/auxiliary/vk/vk_bundle_init.c
+index 41e8721d1..4873fcd6e 100644
+--- a/src/xrt/auxiliary/vk/vk_bundle_init.c
++++ b/src/xrt/auxiliary/vk/vk_bundle_init.c
+@@ -875,6 +875,13 @@ filter_device_features(struct vk_bundle *vk,
+ 	};
+ #endif
+ 
++#ifdef VK_KHR_video_encode_av1
++	VkPhysicalDeviceVideoEncodeAV1FeaturesKHR video_encode_av1_info = {
++	    .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VIDEO_ENCODE_AV1_FEATURES_KHR,
++	    .pNext = NULL,
++	};
++#endif
++
+ #ifdef VK_ANDROID_external_format_resolve
+ 	VkPhysicalDeviceExternalFormatResolveFeaturesANDROID ext_fmt_resolve_info = {
+ 	    .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_EXTERNAL_FORMAT_RESOLVE_FEATURES_ANDROID,
+@@ -932,6 +939,13 @@ filter_device_features(struct vk_bundle *vk,
+ 	}
+ #endif
+ 
++#ifdef VK_KHR_video_encode_av1
++	if (vk->has_KHR_video_encode_av1) {
++		vk_append_to_pnext_chain((VkBaseInStructure *)&physical_device_features,
++		                         (VkBaseInStructure *)&video_encode_av1_info);
++	}
++#endif
++
+ #ifdef VK_ANDROID_external_format_resolve
+ 	if (vk->has_ANDROID_external_format_resolve) {
+ 		vk_append_to_pnext_chain((VkBaseInStructure *)&physical_device_features,
+@@ -975,6 +989,10 @@ filter_device_features(struct vk_bundle *vk,
+ 	CHECK(video_maintenance_1, video_maintenance_1_info.videoMaintenance1);
+ #endif
+ 
++#ifdef VK_KHR_video_encode_av1
++	CHECK(video_encode_av1, video_encode_av1_info.videoEncodeAV1);
++#endif
++
+ #ifdef VK_ANDROID_external_format_resolve
+ 	CHECK(ext_fmt_resolve, ext_fmt_resolve_info.externalFormatResolve);
+ #endif
+@@ -996,7 +1014,8 @@ filter_device_features(struct vk_bundle *vk,
+ 	         "\n\tstorage_buffer_8bit_access: %i"
+ 	         "\n\tsynchronization_2: %i"
+ 	         "\n\ttimeline_semaphore: %i"
+-	         "\n\tvideo_maintenance_1: %i",                              //
++	         "\n\tvideo_maintenance_1: %i"
++	         "\n\tvideo_encode_av1: %i",                                 //
+ 	         device_features->ext_fmt_resolve,                           //
+ 	         device_features->null_descriptor,                           //
+ 	         device_features->shader_image_gather_extended,              //
+@@ -1004,7 +1023,8 @@ filter_device_features(struct vk_bundle *vk,
+ 	         device_features->storage_buffer_8bit_access,                //
+ 	         device_features->synchronization_2,                         //
+ 	         device_features->timeline_semaphore,                        //
+-	         device_features->video_maintenance_1);                      //
++	         device_features->video_maintenance_1,                       //
++	         device_features->video_encode_av1);                         //
+ }
+ 
+ static inline void
+@@ -1258,6 +1278,14 @@ vk_create_device(struct vk_bundle *vk,
+ 	};
+ #endif
+ 
++#ifdef VK_KHR_video_encode_av1
++	VkPhysicalDeviceVideoEncodeAV1FeaturesKHR video_encode_av1_info = {
++	    .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VIDEO_ENCODE_AV1_FEATURES_KHR,
++	    .pNext = NULL,
++	    .videoEncodeAV1 = device_features.video_encode_av1,
++	};
++#endif
++
+ #ifdef VK_ANDROID_external_format_resolve
+ 	VkPhysicalDeviceExternalFormatResolveFeaturesANDROID ext_fmt_resolve_info = {
+ 	    .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_EXTERNAL_FORMAT_RESOLVE_FEATURES_ANDROID,
+@@ -1325,6 +1353,13 @@ vk_create_device(struct vk_bundle *vk,
+ 	}
+ #endif
+ 
++#ifdef VK_KHR_video_encode_av1
++	if (vk->has_KHR_video_encode_av1) {
++		vk_append_to_pnext_chain((VkBaseInStructure *)&device_create_info,
++		                         (VkBaseInStructure *)&video_encode_av1_info);
++	}
++#endif
++
+ #ifdef VK_ANDROID_external_format_resolve
+ 	if (vk->has_ANDROID_external_format_resolve) {
+ 		vk_append_to_pnext_chain((VkBaseInStructure *)&device_create_info,
+diff --git a/src/xrt/auxiliary/vk/vk_generate_inc_files.py b/src/xrt/auxiliary/vk/vk_generate_inc_files.py
+index 51568099a..4998a2be0 100644
+--- a/src/xrt/auxiliary/vk/vk_generate_inc_files.py
++++ b/src/xrt/auxiliary/vk/vk_generate_inc_files.py
+@@ -315,6 +315,7 @@ DEVICE_EXTENSIONS_TO_CHECK = [
+     "VK_KHR_synchronization2",
+     "VK_KHR_timeline_semaphore",
+     "VK_KHR_video_maintenance1",
++    "VK_KHR_video_encode_av1",
+     "VK_EXT_calibrated_timestamps",
+     "VK_EXT_display_control",
+     "VK_EXT_external_memory_dma_buf",
+@@ -450,6 +451,7 @@ def make_ext_name_define(ext: str):
+     str = str.replace("2", "_2")
+     str = str.replace("3", "_3")
+     str = str.replace("4", "_4")
++    str = str.replace("_AV_1", "_AV1") # Temporary solution
+ 
+     return "{}_EXTENSION_NAME".format(str)
+ 
+diff --git a/src/xrt/auxiliary/vk/vk_helpers.h b/src/xrt/auxiliary/vk/vk_helpers.h
+index 62fad8c2d..3fa0043fc 100644
+--- a/src/xrt/auxiliary/vk/vk_helpers.h
++++ b/src/xrt/auxiliary/vk/vk_helpers.h
+@@ -174,6 +174,7 @@ struct vk_bundle
+ 
+ 		//! Was KHR_video_maintenance1 requested, available, and enabled?
+ 		bool video_maintenance_1;
++		bool video_encode_av1;
+ 	} features;
+ 
+ 	struct
+@@ -824,6 +825,7 @@ struct vk_device_features
+ 	bool storage_buffer_8bit_access;
+ 	bool present_wait;
+ 	bool video_maintenance_1;
++	bool video_encode_av1;
+ };
+ 
+ /*!
+-- 
+2.52.0
+

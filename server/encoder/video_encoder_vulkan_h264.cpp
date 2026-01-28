@@ -264,7 +264,7 @@ std::vector<uint8_t> wivrn::video_encoder_vulkan_h264::get_sps_pps()
 	        .writeStdSPS = true,
 	        .writeStdPPS = true,
 	};
-	return get_encoded_parameters(&next);
+	return get_encoded_parameters(&next).second;
 }
 
 void wivrn::video_encoder_vulkan_h264::send_idr_data()

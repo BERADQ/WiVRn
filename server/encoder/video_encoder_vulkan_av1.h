@@ -58,13 +58,20 @@ class video_encoder_vulkan_av1 : public video_encoder_vulkan
 	vk::VideoEncodeAV1PictureInfoKHR picture_info{};
 
 	vk::VideoEncodeAV1GopRemainingFrameInfoKHR gop_info{};
+	vk::VideoEncodeQualityLevelInfoKHR quality_level_info{};
 	vk::VideoEncodeAV1RateControlInfoKHR rate_control_av1{};
 	vk::VideoEncodeAV1RateControlLayerInfoKHR rate_control_layer_av1{};
 
 	vk::VideoEncodeAV1StdFlagsKHR std_flags{};
 	uint32_t single_reference_name_mask = 0;
+	uint32_t max_single_reference_count = 0;
+	uint32_t max_unidirectional_compound_reference_count = 0;
+	uint32_t max_bidirectional_compound_reference_count = 0;
+	uint8_t max_q_index = 0;
+	uint8_t min_q_index = 0;
 	uint32_t superblock_size = 64;
 	uint8_t order_hint_bits = 7;
+	std::vector<uint8_t> encoded_sequence_header;
 
 	video_encoder_vulkan_av1(wivrn_vk_bundle & vk,
 	                         const vk::VideoCapabilitiesKHR & video_caps,
