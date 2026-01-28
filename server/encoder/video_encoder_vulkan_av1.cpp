@@ -403,12 +403,12 @@ void * wivrn::video_encoder_vulkan_av1::encode_info_next(uint32_t frame_num, siz
 	std_picture_info.pBufferRemovalTimes = nullptr;
 
 	if (ref_slot)
-		std_picture_info.ref_frame_idx[0] = static_cast<int8_t>(*ref_slot);
+		std_picture_info.ref_frame_idx[0] = 0;
 
 	if (ref_slot)
 	{
 		const auto & ref_info = dpb_std_info[*ref_slot];
-		std_picture_info.ref_order_hint[*ref_slot] = ref_info.OrderHint;
+		std_picture_info.ref_order_hint[0] = ref_info.OrderHint;
 	}
 
 	picture_info = vk::VideoEncodeAV1PictureInfoKHR{};
