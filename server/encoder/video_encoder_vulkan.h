@@ -39,6 +39,8 @@ class video_encoder_vulkan : public video_encoder
 	vk::raii::CommandPool transfer_command_pool = nullptr;
 	vk::raii::CommandPool video_command_pool = nullptr;
 
+	const vk::VideoProfileInfoKHR * video_profile = nullptr;
+	vk::VideoProfileListInfoKHR video_profile_list;
 	vk::ImageViewUsageCreateInfo image_view_template_next;
 	vk::ImageViewCreateInfo image_view_template;
 	std::unordered_map<VkImage, vk::raii::ImageView> image_views; // for input images

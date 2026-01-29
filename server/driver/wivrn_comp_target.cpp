@@ -212,16 +212,17 @@ static VkResult create_images(struct wivrn_comp_target * cn, vk::ImageUsageFlags
 	        },
 	};
 #if WIVRN_USE_VULKAN_ENCODE
-	if (
-	        vk->features.video_maintenance_1 and
-	        std::ranges::contains(
-	                cn->settings,
-	                encoder_vulkan,
-	                &encoder_settings::encoder_name))
-	{
-		image_info.get().flags |= vk::ImageCreateFlagBits::eVideoProfileIndependentKHR;
-		image_info.get().usage |= vk::ImageUsageFlagBits::eVideoEncodeSrcKHR;
-	}
+	// Don't add video encode usage to composition target images
+	// Video encoding uses temporary images with proper video profile compatibility
+	// if (
+	//         vk->features.video_maintenance_1 and
+	//         std::ranges::contains(
+	//                 cn->settings,
+	//                 encoder_vulkan,
+	//                 &encoder_settings::encoder_name))
+	// {
+	// 	image_info.get().usage |= vk::ImageUsageFlagBits::eVideoEncodeSrcKHR;
+	// }
 #endif
 
 	cn->psc.images.resize(cn->image_count);

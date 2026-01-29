@@ -232,9 +232,10 @@ void wivrn::video_encoder_vulkan::init(const vk::VideoCapabilitiesKHR & video_ca
                                        void * video_session_create_next,
                                        void * session_params_next)
 {
-	vk::VideoProfileListInfoKHR video_profile_list{
+	this->video_profile = &video_profile;
+	video_profile_list = vk::VideoProfileListInfoKHR{
 	        .profileCount = 1,
-	        .pProfiles = &video_profile,
+	        .pProfiles = this->video_profile,
 	};
 
 	// Input image
@@ -372,7 +373,7 @@ void wivrn::video_encoder_vulkan::init(const vk::VideoCapabilitiesKHR & video_ca
 	                             .layerCount = 1},
 	};
 
-	if (not vk.vk.features.video_maintenance_1)
+	// Always create temporary image to avoid video profile compatibility issues
 	{
 		image_view_template.subresourceRange.baseArrayLayer = 0;
 		for (size_t i = 0; i < num_slots; ++i)
@@ -477,13 +478,13 @@ void wivrn::video_encoder_vulkan::init(const vk::VideoCapabilitiesKHR & video_ca
 
 		        },
 		        vk::QueryPoolVideoEncodeFeedbackCreateInfoKHR{
-		                .pNext = &video_profile,
+		                .pNext = video_profile,
 		                .encodeFeedbackFlags =
 		                        vk::VideoEncodeFeedbackFlagBitsKHR::eBitstreamBufferOffset |
 		                        vk::VideoEncodeFeedbackFlagBitsKHR::eBitstreamBytesWritten,
 		        },
 		};
-		U_LOG_D("Vulkan: Creating query pool with video_profile pNext=%p, flags=0x%x", &video_profile, vk::VideoEncodeFeedbackFlagBitsKHR::eBitstreamBufferOffset | vk::VideoEncodeFeedbackFlagBitsKHR::eBitstreamBytesWritten);
+		U_LOG_D("Vulkan: Creating query pool with video_profile pNext=%p, flags=0x%x", video_profile, vk::VideoEncodeFeedbackFlagBitsKHR::eBitstreamBufferOffset | vk::VideoEncodeFeedbackFlagBitsKHR::eBitstreamBytesWritten);
 		query_pool = vk.device.createQueryPool(query_pool_create.get());
 		vk.name(query_pool, "vulkan encoder query pool");
 		U_LOG_D("Vulkan: Query pool created successfully");
@@ -633,6 +634,7 @@ std::pair<bool, vk::Semaphore> wivrn::video_encoder_vulkan::present_image(vk::Im
 
 	// If we encode from top left corner, encode from the source image directly
 	bool encode_direct = not slot_item.tmp_image;
+	U_LOG_D("Vulkan: present_image: encode_direct=%u, tmp_image valid=%u", encode_direct, static_cast<bool>(slot_item.tmp_image));
 
 	vk::ImageView image_view;
 
@@ -756,7 +758,7 @@ std::pair<bool, vk::Semaphore> wivrn::video_encoder_vulkan::present_image(vk::Im
 		        .dstAccessMask = vk::AccessFlagBits2::eVideoEncodeReadKHR,
 		        .oldLayout = vk::ImageLayout::eTransferDstOptimal,
 		        .newLayout = vk::ImageLayout::eVideoEncodeSrcKHR,
-		        .srcQueueFamilyIndex = vk.queue_family_index,
+		        .srcQueueFamilyIndex = vk.encode_queue_family_index,
 		        .dstQueueFamilyIndex = vk.encode_queue_family_index,
 		        .image = slot_item.tmp_image,
 		        .subresourceRange = {.aspectMask = vk::ImageAspectFlagBits::eColor,
