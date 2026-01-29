@@ -484,7 +484,18 @@ void wivrn::video_encoder_vulkan::init(const vk::VideoCapabilitiesKHR & video_ca
 		                        vk::VideoEncodeFeedbackFlagBitsKHR::eBitstreamBytesWritten,
 		        },
 		};
-		U_LOG_D("Vulkan: Creating query pool with video_profile pNext=%p, flags=0x%x", video_profile, vk::VideoEncodeFeedbackFlagBitsKHR::eBitstreamBufferOffset | vk::VideoEncodeFeedbackFlagBitsKHR::eBitstreamBytesWritten);
+		U_LOG_D("Vulkan: Creating query pool with video_profile pNext=%p, flags=0x%x", static_cast<const void *>(video_profile), static_cast<uint32_t>(vk::VideoEncodeFeedbackFlagBitsKHR::eBitstreamBufferOffset | vk::VideoEncodeFeedbackFlagBitsKHR::eBitstreamBytesWritten));
+		if (!video_profile)
+		{
+			U_LOG_E("Vulkan: video_profile is null!");
+			throw std::runtime_error("video_profile is null");
+		}
+		U_LOG_D("Vulkan: video_profile details: sType=%u, videoCodecOperation=%u",
+		        this->video_profile->sType,
+		        static_cast<uint32_t>(this->video_profile->videoCodecOperation));
+		U_LOG_D("Vulkan: Query pool create info: queryType=%u, queryCount=%u",
+		        static_cast<uint32_t>(vk::QueryType::eVideoEncodeFeedbackKHR),
+		        num_slots);
 		query_pool = vk.device.createQueryPool(query_pool_create.get());
 		vk.name(query_pool, "vulkan encoder query pool");
 		U_LOG_D("Vulkan: Query pool created successfully");
@@ -578,9 +589,30 @@ std::optional<wivrn::video_encoder::data> wivrn::video_encoder_vulkan::encode(ui
 	vk::Result res;
 	try
 	{
-		auto [result, data] = query_pool.getResults<uint32_t>(encode_slot, 1, 4 * sizeof(uint32_t), 0, vk::QueryResultFlagBits::eWait | vk::QueryResultFlagBits::eWithStatusKHR);
-		res = result;
-		feedback = data;
+		U_LOG_D("Vulkan: encode: trying non-blocking query pool results first");
+		const uint32_t query_stride = 4 * sizeof(uint32_t);
+		U_LOG_D("Vulkan: encode: query pool info: slot=%u, count=1, dataSize=%u, stride=%u, flags=0x%x",
+		        encode_slot,
+		        query_stride,
+		        query_stride,
+		        static_cast<uint32_t>(vk::QueryResultFlagBits::eWithStatusKHR));
+		auto [nonblock_result, nonblock_data] = query_pool.getResults<uint32_t>(encode_slot, 1, query_stride, query_stride, vk::QueryResultFlagBits::eWithStatusKHR);
+		if (nonblock_result == vk::Result::eNotReady)
+		{
+			U_LOG_D("Vulkan: encode: query not ready (expected), trying blocking wait");
+			U_LOG_D("Vulkan: encode: blocking wait with flags=0x%x",
+			        static_cast<uint32_t>(vk::QueryResultFlagBits::eWait | vk::QueryResultFlagBits::eWithStatusKHR));
+			auto [result, data] = query_pool.getResults<uint32_t>(encode_slot, 1, query_stride, query_stride, vk::QueryResultFlagBits::eWait | vk::QueryResultFlagBits::eWithStatusKHR);
+			res = result;
+			feedback = data;
+		}
+		else
+		{
+			res = nonblock_result;
+			feedback = nonblock_data;
+			U_LOG_D("Vulkan: encode: non-blocking query returned: %s", vk::to_string(res).c_str());
+		}
+
 		if (res != vk::Result::eSuccess)
 		{
 			U_LOG_E("Vulkan: encode: device.getQueryPoolResults failed: %s", vk::to_string(res).c_str());
@@ -774,7 +806,9 @@ std::pair<bool, vk::Semaphore> wivrn::video_encoder_vulkan::present_image(vk::Im
 		image_view = slot_item.view;
 	}
 
+	U_LOG_D("Vulkan: present_image: Resetting query pool for slot=%u", encode_slot);
 	video_cmd_buf.resetQueryPool(*query_pool, encode_slot, 1);
+	U_LOG_D("Vulkan: present_image: Query pool reset completed for slot=%u", encode_slot);
 
 	auto & dpb = (dpb_state &)*idr;
 	std::unique_lock lock(dpb.mutex);
@@ -898,9 +932,11 @@ std::pair<bool, vk::Semaphore> wivrn::video_encoder_vulkan::present_image(vk::Im
 	}
 
 	U_LOG_D("Vulkan: present_image: Starting encodeVideoKHR for slot=%u", encode_slot);
+	U_LOG_D("Vulkan: present_image: Beginning query for slot=%u", encode_slot);
 	video_cmd_buf.beginQuery(*query_pool, encode_slot, {});
 	video_cmd_buf.encodeVideoKHR(encode_info);
 	U_LOG_D("Vulkan: present_image: encodeVideoKHR completed for slot=%u", encode_slot);
+	U_LOG_D("Vulkan: present_image: Ending query for slot=%u", encode_slot);
 	video_cmd_buf.endQuery(*query_pool, encode_slot);
 	video_cmd_buf.endVideoCodingKHR(vk::VideoEndCodingInfoKHR{});
 	U_LOG_D("Vulkan: present_image: endVideoCodingKHR completed");
