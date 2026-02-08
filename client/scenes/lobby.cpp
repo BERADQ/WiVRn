@@ -906,10 +906,7 @@ void scenes::lobby::render(const XrFrameState & frame_state)
 		if (!next_scene->alive())
 			next_scene.reset();
 		else if (next_scene->current_state() == scenes::stream::state::streaming)
-		{
-			autoconnect_enabled = true;
 			application::push_scene(next_scene);
-		}
 	}
 
 	update_server_list();
@@ -976,14 +973,14 @@ void scenes::lobby::render(const XrFrameState & frame_state)
 		auto windows = imgui_ctx->windows();
 
 		auto left = left_hand->locate(world_space, frame_state.predictedDisplayTime);
-		if (left and xr::hand_tracker::check_flags(*left, XR_SPACE_LOCATION_POSITION_TRACKED_BIT | XR_SPACE_LOCATION_POSITION_VALID_BIT, 0))
+		if (left)
 		{
 			stick_finger_to_gui(*left, windows);
 			hide_left_controller = true;
 		}
 
 		auto right = right_hand->locate(world_space, frame_state.predictedDisplayTime);
-		if (right and xr::hand_tracker::check_flags(*right, XR_SPACE_LOCATION_POSITION_TRACKED_BIT | XR_SPACE_LOCATION_POSITION_VALID_BIT, 0))
+		if (right)
 		{
 			stick_finger_to_gui(*right, windows);
 			hide_right_controller = true;
@@ -1385,6 +1382,8 @@ void scenes::lobby::on_xr_event(const xr::event & event)
 		case XR_TYPE_EVENT_DATA_SESSION_STATE_CHANGED:
 			if (event.state_changed.state == XR_SESSION_STATE_STOPPING)
 				discover.reset();
+			else if (event.state_changed.state == XR_SESSION_STATE_FOCUSED)
+				autoconnect_enabled = true;
 			recenter_gui = true;
 			break;
 		case XR_TYPE_EVENT_DATA_REFERENCE_SPACE_CHANGE_PENDING:
