@@ -138,7 +138,7 @@ NV_ENC_RC_PARAMS video_encoder_nvenc::get_rc_params(uint64_t bitrate, float fram
 	        .vbvBufferSize = static_cast<uint32_t>(bitrate / framerate * 2.0f),
 	        .vbvInitialDelay = static_cast<uint32_t>(bitrate / framerate),
 	        .enableLookahead = 0,
-	        .lowDelayKeyFrameScale = 2,
+	        .lowDelayKeyFrameScale = 1,
 	        .multiPass = NV_ENC_TWO_PASS_QUARTER_RESOLUTION};
 }
 
@@ -198,7 +198,7 @@ video_encoder_nvenc::video_encoder_nvenc(
 	config.rcParams.enableNonRefP = 1;
 
 	// config.gopLength = NVENC_INFINITE_GOPLENGTH;
-	config.gopLength = 30;
+	config.gopLength = 120;
 	config.frameIntervalP = 1;
 
 	NV_ENC_BIT_DEPTH bitDepth = NV_ENC_BIT_DEPTH_8;
@@ -233,7 +233,7 @@ video_encoder_nvenc::video_encoder_nvenc(
 			// config.encodeCodecConfig.h264Config.maxNumRefFrames = 0;
 			// config.encodeCodecConfig.h264Config.idrPeriod = NVENC_INFINITE_GOPLENGTH;
 			config.encodeCodecConfig.h264Config.maxNumRefFrames = 1;
-			config.encodeCodecConfig.h264Config.idrPeriod = 30;
+			config.encodeCodecConfig.h264Config.idrPeriod = 120;
 			config.encodeCodecConfig.h264Config.h264VUIParameters.videoFullRangeFlag = 1;
 
 			break;
@@ -251,7 +251,7 @@ video_encoder_nvenc::video_encoder_nvenc(
 			// config.encodeCodecConfig.hevcConfig.maxNumRefFramesInDPB = 0;
 			// config.encodeCodecConfig.hevcConfig.idrPeriod = NVENC_INFINITE_GOPLENGTH;
 			config.encodeCodecConfig.hevcConfig.maxNumRefFramesInDPB = 1;
-			config.encodeCodecConfig.hevcConfig.idrPeriod = 30;
+			config.encodeCodecConfig.hevcConfig.idrPeriod = 120;
 			config.encodeCodecConfig.hevcConfig.hevcVUIParameters.videoFullRangeFlag = 1;
 
 			break;
@@ -269,7 +269,7 @@ video_encoder_nvenc::video_encoder_nvenc(
 			// config.encodeCodecConfig.av1Config.maxNumRefFramesInDPB = 0;
 			// config.encodeCodecConfig.av1Config.idrPeriod = NVENC_INFINITE_GOPLENGTH;
 			config.encodeCodecConfig.av1Config.maxNumRefFramesInDPB = 1;
-			config.encodeCodecConfig.av1Config.idrPeriod = 30;
+			config.encodeCodecConfig.av1Config.idrPeriod = 120;
 
 			break;
 		case video_codec::raw:
